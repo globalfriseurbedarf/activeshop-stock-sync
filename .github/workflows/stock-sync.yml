@@ -5,6 +5,10 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch:
 
+concurrency:
+  group: stock-sync
+  cancel-in-progress: false
+
 jobs:
   sync-stock:
     runs-on: ubuntu-latest
