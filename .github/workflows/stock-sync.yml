@@ -1,0 +1,47 @@
+name: ActiveShop Shopify Stock Sync
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sync-stock:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Dosyalari al
+        uses: actions/checkout@v4
+
+      - name: Python kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Python paketlerini kur
+        run: pip install -r requirements.txt
+
+      - name: ActiveShop stoklarini Shopify ile senkronize et
+        env:
+          FEED_URL: "https://b2b.activeshop.com.pl/media/productsfeed/b2b-de.csv"
+
+          SHOPIFY_SHOP: "bzjwyw-jv.myshopify.com"
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          SHOPIFY_API_VERSION: "2026-04"
+
+          FEED_SKU_COLUMN: "sku"
+          FEED_STOCK_COLUMN: "qty"
+
+          DRY_RUN: "true"
+
+          SHOPIFY_LOCATION_ID: ${{ secrets.SHOPIFY_LOCATION_ID }}
+          SET_MISSING_SKU_TO_ZERO: "false"
+
+        run: python stock_sync.py
+
+      - name: Raporu yukle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-sync-report
+          path: stock_sync_report.csv
