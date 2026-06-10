@@ -32,7 +32,7 @@ jobs:
           FEED_SKU_COLUMN: "sku"
           FEED_STOCK_COLUMN: "qty"
 
-          DRY_RUN: "true"
+          DRY_RUN: "false"
 
           SHOPIFY_LOCATION_ID: ${{ secrets.SHOPIFY_LOCATION_ID }}
           SET_MISSING_SKU_TO_ZERO: "false"
