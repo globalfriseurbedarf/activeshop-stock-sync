@@ -36,9 +36,16 @@ jobs:
           FEED_SKU_COLUMN: "sku"
           FEED_STOCK_COLUMN: "qty"
 
+          # Artik stoklar bu lokasyona yazilacak: Lager in Wroclaw
+          SHOPIFY_LOCATION_ID: "119279812950"
+
+          # Yanlis depoda kalan stoklari 0 yapar.
+          ZERO_OTHER_LOCATIONS: "true"
+
+          # Ilk test icin true yapabilirsin. Gercek guncelleme icin false olmali.
           DRY_RUN: "false"
 
-          SHOPIFY_LOCATION_ID: ${{ secrets.SHOPIFY_LOCATION_ID }}
+          # Feedde olmayan Shopify urunleri 0 yapilmasin.
           SET_MISSING_SKU_TO_ZERO: "false"
 
         run: python stock_sync.py
