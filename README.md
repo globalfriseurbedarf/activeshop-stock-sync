@@ -1,67 +1,64 @@
 # ActiveShop -> Shopify Stok Senkronizasyonu
 
-Bu proje ActiveShop CSV feed dosyasini indirir ve Shopify'daki varyant stoklarini SKU eslesmesine gore gunceller.
+Bu proje ActiveShop CSV feed dosyasini indirir ve Shopify stoklarini SKU eslesmesine gore gunceller.
 
-## Dosyalar
+## Dogru depo
 
-- `stock_sync.py`: Ana Python kodu
-- `requirements.txt`: Python paketleri
-- `.github/workflows/stock-sync.yml`: GitHub Actions otomatik calisma dosyasi
+Stoklar su Shopify lokasyonuna yazilir:
 
-## GitHub Secrets
+```txt
+Lager in Wroclaw
+Location ID: 119279812950
+```
+
+Workflow icinde su ayar vardir:
+
+```yaml
+SHOPIFY_LOCATION_ID: "119279812950"
+ZERO_OTHER_LOCATIONS: "true"
+```
+
+Bu ayar sayesinde stoklar sadece Lager in Wroclaw deposunda tutulur. Diger lokasyonlarda kalan stoklar 0 yapilir.
+
+## GitHub Secret
 
 Repository icinde su alana gir:
 
-`Settings > Secrets and variables > Actions > New repository secret`
-
-Eklemen gereken zorunlu secret:
-
-```text
-SHOPIFY_ACCESS_TOKEN
+```txt
+Settings > Secrets and variables > Actions > New repository secret
 ```
 
-Opsiyonel secret:
+Eklemen gereken secret:
 
-```text
-SHOPIFY_LOCATION_ID
+```txt
+Name: SHOPIFY_ACCESS_TOKEN
+Value: shpat_xxxxxxxxxxxxxxxxx
 ```
 
-Birden fazla Shopify lokasyonun varsa `SHOPIFY_LOCATION_ID` eklemen daha dogru olur.
+## Otomatik calisma
 
-## Ilk Test
-
-Workflow dosyasinda ilk test icin bu sekilde birak:
+Workflow 15 dakikada bir calisir:
 
 ```yaml
-DRY_RUN: "true"
+cron: "*/15 * * * *"
 ```
 
-GitHub'da:
+Manuel calistirmak icin:
 
-`Actions > ActiveShop Shopify Stock Sync > Run workflow`
-
-Calistir.
-
-Loglarda su alanlari kontrol et:
-
-```text
-Kullanilan ActiveShop SKU kolonu: sku
-Kullanilan ActiveShop stok kolonu: qty
-DRY_RUN_GUNCELLENECEK
+```txt
+Actions > ActiveShop Shopify Stock Sync > Run workflow
 ```
 
-## Gercek Guncelleme
+## Test modu
 
-Test basariliysa `.github/workflows/stock-sync.yml` icinde sunu:
-
-```yaml
-DRY_RUN: "true"
-```
-
-buna cevir:
+Gercek guncelleme acik:
 
 ```yaml
 DRY_RUN: "false"
 ```
 
-Sonra commit yap. Sistem 15 dakikada bir otomatik calisir.
+Sadece test yapmak icin:
+
+```yaml
+DRY_RUN: "true"
+```
