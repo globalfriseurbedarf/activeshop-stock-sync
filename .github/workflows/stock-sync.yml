@@ -1,93 +1,150 @@
-name: ActiveShop Shopify Stock Sync
+name: ActiveShop to Plenty PRICE Sync V11
 
 on:
-  schedule:
-    # Her 15 dakikada bir. Dakikalari ozellikle degistirdik;
-    # bu dosyanin commit edilmesi devre disi schedule'i yeniden etkinlestirebilir.
-    - cron: "3,18,33,48 * * * *"
   workflow_dispatch:
+    inputs:
+      test_sku:
+        description: "Tek urun test etmek icin SKU girin. Bos birakilirsa normal senkron calisir."
+        required: false
+        default: ""
+        type: string
 
-# Aylik keepalive commit'i icin gerekli.
+  schedule:
+    # GitHub cron UTC kullanir.
+    # Turkiye saatiyle yaklasik: 04:41, 08:41, 12:41, 16:41, 20:41, 00:41
+    # Gunde 6 kez x 300 = 1.800 urun/gun.
+    - cron: "41 1,5,9,13,17,21 * * *"
+
 permissions:
   contents: write
 
 concurrency:
-  group: stock-sync
+  group: activeshop-plenty-price-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  sync-stock:
+  price-sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      TEST_SKU: ${{ github.event.inputs.test_sku || '' }}
+
+      # ActiveShop
+      ACTIVESHOP_HOST: https://b2b.activeshop.com.pl
+      ACTIVESHOP_STORE_CODE: B2B_PL_de
+      ACTIVESHOP_USERNAME: ${{ secrets.ACTIVESHOP_USERNAME }}
+      ACTIVESHOP_PASSWORD: ${{ secrets.ACTIVESHOP_PASSWORD }}
+      ACTIVESHOP_PROXY_URL: ${{ secrets.ACTIVESHOP_PROXY_URL }}
+
+      # Plenty
+      PLENTY_BASE_URL: ${{ secrets.PLENTY_BASE_URL }}
+      PLENTY_USERNAME: ${{ secrets.PLENTY_USERNAME }}
+      PLENTY_PASSWORD: ${{ secrets.PLENTY_PASSWORD }}
+
+      # Yazma / guncelleme anahtarlari
+      PLENTY_ENABLE_WRITE: ${{ vars.PLENTY_ENABLE_WRITE || 'false' }}
+      UPDATE_PURCHASE_PRICE: ${{ vars.UPDATE_PURCHASE_PRICE || 'true' }}
+      UPDATE_STOCK: "false"
+      UPDATE_SALES_PRICE: ${{ vars.UPDATE_SALES_PRICE || 'false' }}
+      PLENTY_SALES_PRICE_ID: ${{ vars.PLENTY_SALES_PRICE_ID || '8' }}
+
+      # Alis fiyati: ActiveShop net B2B -> Plenty purchasePrice
+      PURCHASE_PRICE_MULTIPLIER: ${{ vars.PURCHASE_PRICE_MULTIPLIER || '1.0' }}
+      PURCHASE_PRICE_ADD: ${{ vars.PURCHASE_PRICE_ADD || '0.0' }}
+
+      # Satis fiyati: ActiveShop net x 1.25 x 1.19
+      SALES_PRICE_PROFIT_RATE: ${{ vars.SALES_PRICE_PROFIT_RATE || '0.25' }}
+      SALES_PRICE_VAT_RATE: ${{ vars.SALES_PRICE_VAT_RATE || '0.19' }}
+      SALES_PRICE_ADD: ${{ vars.SALES_PRICE_ADD || '0.0' }}
+
+      # Dosyalar
+      INPUT_CSV: input/Global Fiyat Guncelleme.csv
+      OUTPUT_CSV: output/price_sync.csv
+      FAILED_CSV: output/price_failed_products.csv
+      SUMMARY_JSON: output/price_run_summary.json
+      STATE_JSON: state/price_sync_progress.json
+
+      # Calisma ayarlari
+      MAX_PRODUCTS_PER_RUN: "300"
+      MAX_RUN_MINUTES: "100"
+      CHECKPOINT_EVERY: "25"
+      ACTIVESHOP_REQUEST_SLEEP: "0.90"
+      ACTIVESHOP_REQUEST_JITTER: "0.25"
+      ACTIVESHOP_RATE_RETRIES: "4"
+      ACTIVESHOP_RATE_BASE_WAIT: "20"
+      ACTIVESHOP_RATE_MAX_WAIT: "180"
+      ACTIVESHOP_LOGIN_RETRIES: "4"
+      ACTIVESHOP_LOGIN_BASE_WAIT: "20"
+      ACTIVESHOP_LOGIN_MAX_WAIT: "120"
+      PLENTY_WRITE_INTERVAL: "1.70"
+      PLENTY_MAX_RETRIES: "5"
 
     steps:
-      - name: Dosyalari al
-        uses: actions/checkout@v4
+      - name: Repository dosyalarini al
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      # GitHub, public repolarda 60 gun repo aktivitesi olmazsa scheduled
-      # workflow'lari otomatik kapatabilir. Bu adim ayda bir kucuk bir commit
-      # olusturarak repoda aktivite olmasini saglar.
-      # Keepalive basarisiz olsa bile stok senkronu durmasin diye
-      # continue-on-error kullaniliyor.
-      - name: Schedule keepalive
-        if: github.event_name == 'schedule'
-        continue-on-error: true
+      - name: Python kur
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Kutuphaneleri kur
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Dahili testleri calistir
+        run: python -m unittest discover -s tests -v
+
+      - name: CSV ve fiyat ayarlarini kontrol et
+        run: python run_sync.py --validate-only
+
+      - name: ActiveShop fiyatlarini Plenty ile eslestir
         shell: bash
         run: |
-          MONTH="$(date -u +'%Y-%m')"
-          KEEPALIVE_FILE=".github/.schedule-keepalive"
-          LAST_MONTH="$(cat "$KEEPALIVE_FILE" 2>/dev/null || true)"
+          echo "=============================================="
+          echo "ActiveShop -> Plenty PRICE Sync V11"
+          echo "=============================================="
 
-          if [ "$LAST_MONTH" = "$MONTH" ]; then
-            echo "Keepalive bu ay zaten yazildi: $MONTH"
-            exit 0
+          if [ -n "$TEST_SKU" ]; then
+            echo "TEK SKU MODU | SKU: $TEST_SKU"
+            echo "Normal senkron progress bilgisi degismeyecek."
+            python run_sync.py --test-sku "$TEST_SKU"
+          else
+            echo "NORMAL SENKRON MODU"
+            echo "Senkron kaldigi yerden devam edecek."
+            python run_sync.py
           fi
 
-          printf '%s\n' "$MONTH" > "$KEEPALIVE_FILE"
+      - name: Sonuclari artifact olarak yukle
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: activeshop-plenty-price-${{ github.run_number }}
+          path: |
+            output/*.csv
+            output/*.json
+            state/*.json
+          if-no-files-found: warn
+          retention-days: 30
 
+      - name: Normal senkron progress ve raporlarini repositoryye kaydet
+        if: success() && env.TEST_SKU == ''
+        shell: bash
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$KEEPALIVE_FILE"
-          git commit -m "chore: keep scheduled stock sync active ($MONTH)"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
 
-      - name: Python kur
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+          git add -- output state
 
-      - name: Python paketlerini kur
-        run: pip install -r requirements.txt
-
-      - name: ActiveShop stoklarini Shopify ile senkronize et
-        env:
-          FEED_URL: "https://b2b.activeshop.com.pl/media/productsfeed/b2b-de.csv"
-
-          SHOPIFY_SHOP: "bzjwyw-jv.myshopify.com"
-          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
-          SHOPIFY_API_VERSION: "2026-04"
-
-          FEED_SKU_COLUMN: "sku"
-          FEED_STOCK_COLUMN: "qty"
-
-          # Artik stoklar bu lokasyona yazilacak: Lager in Wroclaw
-          SHOPIFY_LOCATION_ID: "119279812950"
-
-          # Yanlis depoda kalan stoklari 0 yapar.
-          ZERO_OTHER_LOCATIONS: "true"
-
-          # Ilk test icin true yapabilirsin. Gercek guncelleme icin false olmali.
-          DRY_RUN: "false"
-
-          # Feedde olmayan Shopify urunleri 0 yapilmasin.
-          SET_MISSING_SKU_TO_ZERO: "false"
-
-        run: python stock_sync.py
-
-      - name: Raporu yukle
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stock-sync-report
-          path: stock_sync_report.csv
+          if git diff --cached --quiet; then
+            echo "Degisiklik yok; commit olusturulmadi."
+          else
+            git commit -m "chore: sync ActiveShop prices to Plenty"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin HEAD:"${GITHUB_REF_NAME}"
+          fi
