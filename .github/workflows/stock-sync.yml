@@ -2,8 +2,14 @@ name: ActiveShop Shopify Stock Sync
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    # Her 15 dakikada bir. Dakikalari ozellikle degistirdik;
+    # bu dosyanin commit edilmesi devre disi schedule'i yeniden etkinlestirebilir.
+    - cron: "3,18,33,48 * * * *"
   workflow_dispatch:
+
+# Aylik keepalive commit'i icin gerekli.
+permissions:
+  contents: write
 
 concurrency:
   group: stock-sync
@@ -16,6 +22,35 @@ jobs:
     steps:
       - name: Dosyalari al
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # GitHub, public repolarda 60 gun repo aktivitesi olmazsa scheduled
+      # workflow'lari otomatik kapatabilir. Bu adim ayda bir kucuk bir commit
+      # olusturarak repoda aktivite olmasini saglar.
+      # Keepalive basarisiz olsa bile stok senkronu durmasin diye
+      # continue-on-error kullaniliyor.
+      - name: Schedule keepalive
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        shell: bash
+        run: |
+          MONTH="$(date -u +'%Y-%m')"
+          KEEPALIVE_FILE=".github/.schedule-keepalive"
+          LAST_MONTH="$(cat "$KEEPALIVE_FILE" 2>/dev/null || true)"
+
+          if [ "$LAST_MONTH" = "$MONTH" ]; then
+            echo "Keepalive bu ay zaten yazildi: $MONTH"
+            exit 0
+          fi
+
+          printf '%s\n' "$MONTH" > "$KEEPALIVE_FILE"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$KEEPALIVE_FILE"
+          git commit -m "chore: keep scheduled stock sync active ($MONTH)"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Python kur
         uses: actions/setup-python@v5
