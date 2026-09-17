@@ -152,11 +152,79 @@ def chunk_list(values: List[int], size: int) -> List[List[int]]:
 # ACTVIESHOP CSV INDIRME VE OKUMA
 # ==========================================================
 
+# Feed indirme icin opsiyonel kimlik bilgileri (GitHub Secrets ile verilir)
+FEED_USERNAME = os.getenv("FEED_USERNAME", "").strip()      # HTTP Basic Auth kullanici
+FEED_PASSWORD = os.getenv("FEED_PASSWORD", "").strip()      # HTTP Basic Auth sifre
+FEED_COOKIE = os.getenv("FEED_COOKIE", "").strip()          # Tarayicidan kopyalanan Cookie basligi
+FEED_BEARER_TOKEN = os.getenv("FEED_BEARER_TOKEN", "").strip()
+FEED_EXTRA_HEADERS = os.getenv("FEED_EXTRA_HEADERS", "").strip()  # "Key: Value; Key2: Value2"
+FEED_MAX_RETRIES = int(os.getenv("FEED_MAX_RETRIES", "4"))
+
+
+def build_feed_headers() -> Dict[str, str]:
+    headers = {
+        # python-requests varsayilan UA'si cogu WAF tarafindan engellenir; tarayici gibi gorun
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/csv,text/plain,application/octet-stream,*/*;q=0.8",
+        "Accept-Language": "de-DE,de;q=0.9,pl;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://b2b.activeshop.com.pl/",
+        "Connection": "keep-alive",
+    }
+    if FEED_COOKIE:
+        headers["Cookie"] = FEED_COOKIE
+    if FEED_BEARER_TOKEN:
+        headers["Authorization"] = f"Bearer {FEED_BEARER_TOKEN}"
+    if FEED_EXTRA_HEADERS:
+        for part in FEED_EXTRA_HEADERS.split(";"):
+            if ":" in part:
+                k, v = part.split(":", 1)
+                headers[k.strip()] = v.strip()
+    return headers
+
+
 def download_feed() -> pd.DataFrame:
     log(f"ActiveShop CSV indiriliyor: {FEED_URL}")
 
-    response = requests.get(FEED_URL, timeout=120)
-    response.raise_for_status()
+    session = requests.Session()
+    session.headers.update(build_feed_headers())
+    auth = (FEED_USERNAME, FEED_PASSWORD) if FEED_USERNAME else None
+
+    response = None
+    last_error: Optional[Exception] = None
+    for attempt in range(1, FEED_MAX_RETRIES + 1):
+        try:
+            response = session.get(FEED_URL, auth=auth, timeout=120, allow_redirects=True)
+            if response.status_code in (403, 429, 500, 502, 503, 504) and attempt < FEED_MAX_RETRIES:
+                log(f"Feed HTTP {response.status_code} (deneme {attempt}/{FEED_MAX_RETRIES}), tekrar denenecek...")
+                time.sleep(3 * attempt)
+                continue
+            response.raise_for_status()
+            break
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt < FEED_MAX_RETRIES:
+                log(f"Feed indirme hatasi (deneme {attempt}/{FEED_MAX_RETRIES}): {exc}")
+                time.sleep(3 * attempt)
+            else:
+                raise
+
+    if response is None:
+        raise RuntimeError(f"Feed indirilemedi: {last_error}")
+
+    # Login sayfasina yonlendirildiysek CSV yerine HTML gelir; bunu erken yakala
+    content_type = response.headers.get("Content-Type", "")
+    if "text/html" in content_type.lower() or response.content[:200].lstrip().lower().startswith(b"<!doctype html") or response.content[:200].lstrip().lower().startswith(b"<html"):
+        raise RuntimeError(
+            "Feed URL'si CSV yerine HTML dondurdu (buyuk ihtimalle login sayfasi). "
+            "Feed giris gerektiriyor: FEED_USERNAME/FEED_PASSWORD veya FEED_COOKIE secret'i ekle, "
+            "ya da ActiveShop'tan token'li/IP'siz erisilebilir feed linki iste."
+        )
+
+    log(f"Feed indirildi: HTTP {response.status_code}, {len(response.content)} byte, Content-Type: {content_type}")
 
     content = response.content
 
