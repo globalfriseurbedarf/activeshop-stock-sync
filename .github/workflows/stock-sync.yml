@@ -29,6 +29,12 @@ jobs:
         env:
           FEED_URL: "https://b2b.activeshop.com.pl/media/productsfeed/b2b-de.csv"
 
+          # Feed 403 veriyorsa: ActiveShop B2B giris bilgileri (sadece gerekiyorsa doldur)
+          FEED_USERNAME: ${{ secrets.FEED_USERNAME }}
+          FEED_PASSWORD: ${{ secrets.FEED_PASSWORD }}
+          # Alternatif: tarayicidan kopyalanan Cookie basligi
+          FEED_COOKIE: ${{ secrets.FEED_COOKIE }}
+
           SHOPIFY_SHOP: "bzjwyw-jv.myshopify.com"
           SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
           SHOPIFY_API_VERSION: "2026-04"
