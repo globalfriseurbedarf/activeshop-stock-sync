@@ -198,6 +198,10 @@ def download_feed() -> pd.DataFrame:
     for attempt in range(1, FEED_MAX_RETRIES + 1):
         try:
             response = session.get(FEED_URL, auth=auth, timeout=120, allow_redirects=True)
+            if response.status_code >= 400:
+                # Teshis icin: sunucu ne dondurdu? (Cloudflare mi, login mi, IP engeli mi)
+                log(f"Feed yanit basliklari: {dict(response.headers)}")
+                log(f"Feed yanit govdesi (ilk 600 karakter): {response.text[:600]!r}")
             if response.status_code in (403, 429, 500, 502, 503, 504) and attempt < FEED_MAX_RETRIES:
                 log(f"Feed HTTP {response.status_code} (deneme {attempt}/{FEED_MAX_RETRIES}), tekrar denenecek...")
                 time.sleep(3 * attempt)
