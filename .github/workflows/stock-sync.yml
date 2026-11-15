@@ -1,7 +1,8 @@
 name: ActiveShop CSV + Shopify Stock Sync
 
 # Tek workflow: stok kontrolu 15 dakikada bir devam eder.
-# CSV snapshot gunde iki kez (09:17 / 21:17, Turkiye saati) yenilenir.
+# Manuel yuklenen b2b-de.csv varsayilan kaynaktir.
+# Eskisi gibi otomatik yenileme istenirse Actions Variable AUTO_REFRESH_CSV=true yapin.
 # GitHub cron saatleri UTC'dir; Turkiye UTC+3 kullanir.
 on:
   schedule:
@@ -32,11 +33,14 @@ jobs:
       - name: Gereken Python paketlerini kur
         run: python -m pip install -r requirements.txt
 
+      - name: Stok CSV testleri
+        run: python -m unittest discover -s tests -v
+
       # Bu adim yalnizca gunde 2 defa ve manuel Run workflow'da calisir.
       # Indirme basarisizsa eski CSV korunur; Shopify stok isi devam eder.
       - name: ActiveShop CSV indir, dogrula ve yedek dosyayi yenile
         id: refresh_csv
-        if: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '17 6,18 * * *' }}
+        if: ${{ vars.AUTO_REFRESH_CSV == 'true' && (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 6,18 * * *') }}
         continue-on-error: true
         env:
           FEED_URL: "https://b2b.activeshop.com.pl/media/productsfeed/b2b-de.csv"
@@ -183,11 +187,12 @@ jobs:
           echo "::warning::CSV indirildi ama GitHub'a commit edilemedi. Actions > General > Workflow permissions bolumunde Read and write permissions kontrol edin."
           echo "**CSV commit hatasi:** Bu calismada yeni CSV kullanilabilir, ancak GitHub'daki yedek yenilenemedi." >> "$GITHUB_STEP_SUMMARY"
 
-      # Mevcut stok mantigi AYNI: online CSV'yi dener, olmazsa repo CSV'sini kullanir.
+      # Girilen dosya esastir; online indirme sadece yerel dosya yoksa denenir.
       - name: ActiveShop stoklarini Shopify ile senkronize et
         env:
           FEED_URL: "https://b2b.activeshop.com.pl/media/productsfeed/b2b-de.csv"
           FALLBACK_FEED_PATH: "b2b-de.csv"
+          FEED_SOURCE_MODE: "local_first"
           SHOPIFY_SHOP: "bzjwyw-jv.myshopify.com"
           SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
           SHOPIFY_API_VERSION: "2026-04"
