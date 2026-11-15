@@ -21,7 +21,12 @@ FEED_URL = os.getenv(
     "https://b2b.activeshop.com.pl/media/productsfeed/b2b-de.csv"
 )
 
-# ActiveShop internetten indirilemezse bu yerel dosya kullanilir.
+# Aktif kaynak: GitHub'a yuklenen yerel CSV, internetten once gelir.
+# local_first = yerel varsa onu kullan; yoksa online dene.
+# online_first = once online dene, basarisizsa yerel CSV (eski davranis).
+FEED_SOURCE_MODE = os.getenv("FEED_SOURCE_MODE", "local_first").strip().lower()
+
+# ActiveShop internetten indirilemezse veya yerel tercih edilirse bu dosya kullanilir.
 # Relative path stock_sync.py dosyasinin bulundugu klasore gore cozulur.
 FALLBACK_FEED_PATH = os.getenv(
     "FALLBACK_FEED_PATH",
@@ -226,34 +231,38 @@ def _fallback_feed_file() -> Path:
 
 
 def download_feed() -> pd.DataFrame:
-    log(f"ActiveShop CSV indiriliyor: {FEED_URL}")
+    """Tercih edilen kaynak LOCAL: GitHub'a yuklenen CSV gercekten kullanilir."""
+    if FEED_SOURCE_MODE not in {"local_first", "online_first"}:
+        raise RuntimeError("FEED_SOURCE_MODE yalnizca local_first veya online_first olabilir.")
 
-    try:
+    def read_local() -> pd.DataFrame:
+        fallback_path = _fallback_feed_file()
+        if not fallback_path.is_file():
+            raise FileNotFoundError(f"Yerel CSV yok: {fallback_path}")
+        content = fallback_path.read_bytes()
+        modified = datetime.fromtimestamp(fallback_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        log(f"Yerel CSV | dosya: {fallback_path} | boyut: {len(content)} byte | zaman: {modified}")
+        return _parse_feed_bytes(content, f"LOCAL: {fallback_path.name}")
+
+    def read_online() -> pd.DataFrame:
+        log(f"ActiveShop CSV indiriliyor: {FEED_URL}")
         response = requests.get(FEED_URL, timeout=120)
         response.raise_for_status()
         return _parse_feed_bytes(response.content, f"ONLINE: {FEED_URL}")
+
+    if FEED_SOURCE_MODE == "local_first":
+        # Dosya mevcut ama bozuksa farkli CSV'den sessizce stok yazmayalim.
+        if _fallback_feed_file().is_file():
+            return read_local()
+        log("Yerel CSV bulunamadi; online feed denenecek.")
+        return read_online()
+
+    # Eski davranis tercihi, istege bagli tutuluyor.
+    try:
+        return read_online()
     except Exception as online_error:
         log(f"UYARI: Online ActiveShop CSV indirilemedi: {online_error}")
-
-    fallback_path = _fallback_feed_file()
-    log(f"Yerel fallback CSV deneniyor: {fallback_path}")
-
-    if not fallback_path.is_file():
-        raise RuntimeError(
-            "Online ActiveShop CSV indirilemedi ve yerel fallback dosyasi bulunamadi: "
-            f"{fallback_path}"
-        )
-
-    try:
-        content = fallback_path.read_bytes()
-        modified = datetime.fromtimestamp(fallback_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        log(f"Yerel fallback CSV bulundu | boyut: {len(content)} byte | dosya zamani: {modified}")
-        return _parse_feed_bytes(content, f"LOCAL FALLBACK: {fallback_path.name}")
-    except Exception as fallback_error:
-        raise RuntimeError(
-            "Online ActiveShop CSV indirilemedi; yerel fallback dosyasi da okunamadi: "
-            f"{fallback_error}"
-        ) from fallback_error
+    return read_local()
 
 
 def build_feed_stock_map(df: pd.DataFrame) -> Dict[str, int]:
@@ -552,6 +561,7 @@ def main():
     log(f"DRY_RUN: {DRY_RUN}")
     log(f"ZERO_OTHER_LOCATIONS: {ZERO_OTHER_LOCATIONS}")
     log(f"SHOPIFY_LOCATION_ID: {SHOPIFY_LOCATION_ID}")
+    log(f"FEED_SOURCE_MODE: {FEED_SOURCE_MODE}")
 
     df = download_feed()
     feed_stock_map = build_feed_stock_map(df)
